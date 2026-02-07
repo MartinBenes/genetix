@@ -209,6 +209,9 @@
                 <select id="gene-flower-shape" style="flex:1">
                     <option value="round">Oblé</option>
                     <option value="pointy">Špičaté</option>
+                    <option value="tulip">Tulipán</option>
+                    <option value="bell">Zvonček</option>
+                    <option value="daisy">Sedmikráska</option>
                 </select>
                 <select id="gene-flower-size" style="flex:1">
                     <option value="small">Malý</option>
@@ -775,20 +778,61 @@ function drawFruits(ctx, rng, phenotype, data) {
     });
 }
 
-// --- VRSTVA 6: KVĚT (Sepals + shaded petals + detailed center) ---
+// --- VRSTVA 6: KVĚT ---
 function drawFlower(ctx, rng, phenotype, data, windForceInt) {
+    const shape = phenotype.flowerShape;
+    if (shape === 'tulip') return drawFlowerTulip(ctx, rng, phenotype, data, windForceInt);
+    if (shape === 'bell') return drawFlowerBell(ctx, rng, phenotype, data, windForceInt);
+    if (shape === 'daisy') return drawFlowerDaisy(ctx, rng, phenotype, data, windForceInt);
+    return drawFlowerRadial(ctx, rng, phenotype, data, windForceInt);
+}
+
+// Helpers shared by flower renderers
+function getFlowerScale(phenotype) {
+    if (phenotype.flowerSize === 'small') return 0.5;
+    if (phenotype.flowerSize === 'large') return 1.0;
+    return 0.7;
+}
+
+function drawFlowerCenter(ctx, cx, cy, centerR, phenotype) {
+    if (phenotype.sex !== 'male') {
+        const cp = phenotype.flowerColor === 'yellow'
+            ? { highlight: '#ffcc80', light: '#fb8c00', main: '#ef6c00', dark: '#e65100' }
+            : { highlight: '#fffde7', light: '#fff9c4', main: '#fdd835', dark: '#f9a825' };
+        drawShadedCircle(ctx, cx, cy, centerR, cp);
+        drawPixel(ctx, cx, cy - 1, cp.dark);
+        drawPixel(ctx, cx, cy, '#5d4037');
+    } else {
+        drawShadedCircle(ctx, cx, cy, Math.max(s(2), centerR - 2),
+            { highlight: '#a1887f', light: '#8d6e63', main: '#6d4c41', dark: '#4e342e' });
+    }
+}
+
+function drawFlowerStamens(ctx, rng, cx, cy, centerR, rotOff, petalCount, flowerScale, phenotype) {
+    if (phenotype.sex === 'female') return;
+    const stamenCount = rng.range(4, 7);
+    for (let i = 0; i < stamenCount; i++) {
+        const angle = (i / stamenCount) * Math.PI * 2 + rotOff + (Math.PI / petalCount);
+        const len = Math.round(rng.range(s(5), s(9)) * flowerScale);
+        const sx = cx + Math.cos(angle) * len, sy = cy + Math.sin(angle) * len;
+        drawLine(ctx, cx + Math.cos(angle) * (centerR + 1), cy + Math.sin(angle) * (centerR + 1),
+            sx, sy, PALETTES.stamens.stem);
+        drawShadedCircle(ctx, sx, sy, Math.max(1, s(1)),
+            { highlight: '#ffcc80', light: PALETTES.stamens.tipLight, main: PALETTES.stamens.tip, dark: '#e65100' });
+    }
+}
+
+// --- Radial flower (round + pointy) ---
+function drawFlowerRadial(ctx, rng, phenotype, data, windForceInt) {
     const cx = data.topX, cy = data.topY;
     const isPointy = phenotype.flowerShape === 'pointy';
-    let flowerScale = 0.7;
-    if (phenotype.flowerSize === 'small') flowerScale = 0.5;
-    if (phenotype.flowerSize === 'large') flowerScale = 1.0;
+    const flowerScale = getFlowerScale(phenotype);
 
-    const petalCount = rng.range(5, 8); // Count NOT scaled
+    const petalCount = rng.range(5, 8);
     const petalLen = Math.round(rng.range(s(8), s(14)) * flowerScale);
     const petalWidth = Math.round(rng.range(s(4), s(7)) * flowerScale);
     const rotOff = rng.float(0, Math.PI) + (windForceInt * 0.04);
 
-    // Petals
     for (let i = 0; i < petalCount; i++) {
         const angle = rotOff + (i / petalCount) * Math.PI * 2;
         const px = cx + Math.cos(angle) * (petalLen / 1.5);
@@ -802,32 +846,161 @@ function drawFlower(ctx, rng, phenotype, data, windForceInt) {
         drawPixel(ctx, cx + Math.cos(angle) * s(2), cy + Math.sin(angle) * s(2), pColor.shadow || pColor.dark);
     }
 
-    // Center
     const centerR = Math.max(s(3), Math.round(s(3) * flowerScale));
-    if (phenotype.sex !== 'male') {
-        const cp = phenotype.flowerColor === 'yellow'
-            ? { highlight: '#ffcc80', light: '#fb8c00', main: '#ef6c00', dark: '#e65100' }
-            : { highlight: '#fffde7', light: '#fff9c4', main: '#fdd835', dark: '#f9a825' };
-        drawShadedCircle(ctx, cx, cy, centerR, cp);
-        drawPixel(ctx, cx, cy - 1, cp.dark);
-        drawPixel(ctx, cx, cy, '#5d4037');
-    } else {
-        drawShadedCircle(ctx, cx, cy, Math.max(s(2), centerR - 2),
-            { highlight: '#a1887f', light: '#8d6e63', main: '#6d4c41', dark: '#4e342e' });
+    drawFlowerCenter(ctx, cx, cy, centerR, phenotype);
+    drawFlowerStamens(ctx, rng, cx, cy, centerR, rotOff, petalCount, flowerScale, phenotype);
+}
+
+// --- Tulipán (cup-shaped, drawn line by line with petal tips) ---
+function drawFlowerTulip(ctx, rng, phenotype, data, windForceInt) {
+    const cx = data.topX, cy = data.topY;
+    const flowerScale = getFlowerScale(phenotype);
+    const windOff = windForceInt * 0.04;
+
+    const cupH = Math.round(rng.range(s(14), s(20)) * flowerScale);
+    const cupBotW = Math.round(rng.range(s(3), s(5)) * flowerScale);
+    const cupTopW = Math.round(rng.range(s(8), s(11)) * flowerScale);
+    const pColor = PALETTES.flowers[phenotype.flowerColor];
+    const pColor2 = PALETTES.flowers[phenotype.flowerColorSecondary];
+    const petalCount = 3;
+
+    // Cup body: narrow at bottom (stem), wider at top (opening)
+    // Drawn from bottom up (cy -> cy - cupH)
+    for (let row = 0; row < cupH; row++) {
+        const t = row / cupH; // 0 = bottom (stem), 1 = top (opening)
+        const curve = t * t; // quadratic - slow start, fast expansion at top
+        const hw = Math.round(cupBotW + (cupTopW - cupBotW) * curve);
+        const rowY = cy - row;
+        const rowWindX = windOff * row * 0.15;
+
+        for (let dx = -hw; dx <= hw; dx++) {
+            const nx = hw > 0 ? dx / hw : 0;
+            const dot = -(nx * LIGHT_DIR.x + (0.5 - t) * LIGHT_DIR.y);
+            const d = (Math.abs(Math.round(cx + dx)) + Math.abs(rowY)) % 2 === 0;
+
+            // Alternate petal colors based on angular position
+            const petalIdx = Math.floor((nx + 1) / 2 * petalCount);
+            const pal = (petalIdx % 2 === 0) ? pColor : pColor2;
+
+            ctx.fillStyle = shadeColor(dot, d, pal);
+            ctx.fillRect(Math.round(cx + dx + rowWindX), rowY, 1, 1);
+        }
+
+        // Draw dark seams between petals near the top
+        if (t > 0.4) {
+            for (let p = 1; p < petalCount; p++) {
+                const seamX = cx + (p / petalCount - 0.5) * hw * 2 + rowWindX;
+                drawPixel(ctx, seamX, rowY, pColor.dark);
+            }
+        }
     }
 
-    // Stamens
+    // Petal tips at the top (3 small pointed ellipses flaring outward)
+    const topWindX = windOff * cupH * 0.15;
+    for (let i = 0; i < petalCount; i++) {
+        const t = (i + 0.5) / petalCount;
+        const tipX = cx + (t - 0.5) * cupTopW * 2 + topWindX;
+        const tipY = cy - cupH;
+        const tipR = Math.round(s(3) * flowerScale);
+        const pal = (i % 2 === 0) ? pColor : pColor2;
+        const tilt = (t - 0.5) * 0.4; // outer tips tilt outward
+        drawShadedEllipse(ctx, tipX, tipY - tipR * 0.3, tipR, Math.round(tipR * 1.3),
+            -Math.PI / 2 + tilt, pal, {});
+    }
+}
+
+// --- Zvonček (bell-shaped, hanging down with curved sides) ---
+function drawFlowerBell(ctx, rng, phenotype, data, windForceInt) {
+    const cx = data.topX, cy = data.topY;
+    const flowerScale = getFlowerScale(phenotype);
+    const windOff = windForceInt * 0.04;
+
+    const bellH = Math.round(rng.range(s(12), s(18)) * flowerScale);
+    const bellTopW = Math.round(rng.range(s(2), s(4)) * flowerScale);
+    const bellBotW = Math.round(rng.range(s(8), s(12)) * flowerScale);
+    const pColor = PALETTES.flowers[phenotype.flowerColor];
+    const pColor2 = PALETTES.flowers[phenotype.flowerColorSecondary];
+
+    // Bell body: curved profile (sqrt for bell shape), hanging below stem top
+    for (let row = 0; row < bellH; row++) {
+        const t = row / bellH;
+        const curve = Math.sqrt(t); // curved expansion
+        const hw = Math.round(bellTopW + (bellBotW - bellTopW) * curve);
+        const rowY = cy + row;
+        const rowWindX = windOff * row * 0.2;
+        for (let dx = -hw; dx <= hw; dx++) {
+            const nx = hw > 0 ? dx / hw : 0;
+            const dot = -(nx * LIGHT_DIR.x + (t - 0.5) * LIGHT_DIR.y);
+            const d = (Math.abs(Math.round(cx + dx)) + Math.abs(rowY)) % 2 === 0;
+            const pal = (Math.floor(row / s(2)) % 2 === 0) ? pColor : pColor2;
+            ctx.fillStyle = shadeColor(dot, d, pal);
+            ctx.fillRect(Math.round(cx + dx + rowWindX), rowY, 1, 1);
+        }
+    }
+
+    // Scalloped bottom edge (small petal tips)
+    const tipCount = rng.range(4, 6);
+    const botWindX = windOff * bellH * 0.2;
+    for (let i = 0; i < tipCount; i++) {
+        const t = (i + 0.5) / tipCount;
+        const tx = cx + (t - 0.5) * bellBotW * 2 + botWindX;
+        const ty = cy + bellH;
+        const tipR = Math.round(s(2) * flowerScale);
+        drawShadedEllipse(ctx, tx, ty + tipR * 0.5, tipR, Math.round(tipR * 1.5),
+            Math.PI / 2 + (t - 0.5) * 0.3, pColor, {});
+    }
+
+    // Stamens hanging from inside the bell opening (below the bottom edge)
     if (phenotype.sex !== 'female') {
-        const stamenCount = rng.range(4, 7); // Count NOT scaled
-        for (let i = 0; i < stamenCount; i++) {
-            const angle = (i / stamenCount) * Math.PI * 2 + rotOff + (Math.PI / petalCount);
-            const len = Math.round(rng.range(s(5), s(9)) * flowerScale);
-            const sx = cx + Math.cos(angle) * len, sy = cy + Math.sin(angle) * len;
-            drawLine(ctx, cx + Math.cos(angle) * (centerR + 1), cy + Math.sin(angle) * (centerR + 1),
-                sx, sy, PALETTES.stamens.stem);
+        const stCount = rng.range(2, 4);
+        for (let i = 0; i < stCount; i++) {
+            const t = (i + 0.5) / stCount;
+            const sx = cx + (t - 0.5) * bellBotW * 0.7 + botWindX;
+            const stamenLen = rng.range(s(3), s(6));
+            const sy = cy + bellH + stamenLen;
+            drawLine(ctx, sx, cy + bellH, sx, sy, PALETTES.stamens.stem);
             drawShadedCircle(ctx, sx, sy, Math.max(1, s(1)),
                 { highlight: '#ffcc80', light: PALETTES.stamens.tipLight, main: PALETTES.stamens.tip, dark: '#e65100' });
         }
+    }
+}
+
+// --- Sedmikráska (daisy: many thin petals + large center) ---
+function drawFlowerDaisy(ctx, rng, phenotype, data, windForceInt) {
+    const cx = data.topX, cy = data.topY;
+    const flowerScale = getFlowerScale(phenotype);
+
+    const petalCount = rng.range(12, 18);
+    const petalLen = Math.round(rng.range(s(8), s(12)) * flowerScale);
+    const petalWidth = Math.round(rng.range(s(2), s(3)) * flowerScale);
+    const rotOff = rng.float(0, Math.PI) + (windForceInt * 0.04);
+    const pattern = phenotype.flowerPattern;
+
+    // Single layer of thin petals
+    for (let i = 0; i < petalCount; i++) {
+        const angle = rotOff + (i / petalCount) * Math.PI * 2;
+        const px = cx + Math.cos(angle) * (petalLen * 0.6);
+        const py = cy + Math.sin(angle) * (petalLen * 0.6);
+        const colorKey = (i % 2 === 0) ? phenotype.flowerColor : phenotype.flowerColorSecondary;
+        const pColor = PALETTES.flowers[colorKey];
+        const patternColor = pColor.highlight || pColor.light;
+        drawShadedEllipse(ctx, px, py, petalLen / 2, petalWidth, angle, pColor, { pattern, patternColor });
+    }
+
+    // Large textured center
+    const centerR = Math.max(s(4), Math.round(s(5) * flowerScale));
+    const cp = phenotype.flowerColor === 'yellow'
+        ? { highlight: '#ffcc80', light: '#fb8c00', main: '#ef6c00', dark: '#e65100' }
+        : { highlight: '#fffde7', light: '#fff9c4', main: '#fdd835', dark: '#f9a825' };
+    drawShadedCircle(ctx, cx, cy, centerR, cp);
+
+    // Seed texture dots in center
+    for (let i = 0; i < centerR * 3; i++) {
+        const angle = rng.float(0, Math.PI * 2);
+        const dist = rng.float(1, centerR - 1);
+        const dx = Math.round(cx + Math.cos(angle) * dist);
+        const dy = Math.round(cy + Math.sin(angle) * dist);
+        drawPixel(ctx, dx, dy, rng.bool(0.5) ? cp.dark : '#5d4037');
     }
 }
 
